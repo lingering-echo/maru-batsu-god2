@@ -47,35 +47,36 @@ function getWinner(b) {
     return null;
 }
 
-// 脅威評価: 簡略版 - 呼び出しを減らすため、Minimaxの葉でのみ使用
+// 脅威評価: 簡略版 - playerの脅威を重く (必勝法対策)
 function evaluateThreats(board, player) {
     let threats = 0;
+    const multiplier = player === 'player' ? 2 : 1; // player脅威を2倍重く
     // 横の2連続 (簡略: 境界安全)
     for (let row = 0; row < 4; row++) {
         for (let col = 0; col < 3; col++) {  // col <3 (col+2 <5)
-            if (board[row] && board[row][col] === player && board[row][col+1] === player && !board[row][col+2]) threats += 2;
-            if (board[row] && !board[row][col] && board[row][col+1] === player && board[row][col+2] === player) threats += 2;
+            if (board[row] && board[row][col] === player && board[row][col+1] === player && !board[row][col+2]) threats += 2 * multiplier;
+            if (board[row] && !board[row][col] && board[row][col+1] === player && board[row][col+2] === player) threats += 2 * multiplier;
         }
     }
     // 縦の2連続
     for (let col = 0; col < 5; col++) {
         for (let row = 0; row < 2; row++) {
-            if (board[row] && board[row][col] === player && board[row+1] && board[row+1][col] === player && !board[row+2][col]) threats += 2;
-            if (board[row] && !board[row][col] && board[row+1] && board[row+1][col] === player && board[row+2] && board[row+2][col] === player) threats += 2;
+            if (board[row] && board[row][col] === player && board[row+1] && board[row+1][col] === player && !board[row+2][col]) threats += 2 * multiplier;
+            if (board[row] && !board[row][col] && board[row+1] && board[row+1][col] === player && board[row+2] && board[row+2][col] === player) threats += 2 * multiplier;
         }
     }
     // 斜め左上
     for (let row = 0; row < 2; row++) {
         for (let col = 0; col < 3; col++) {  // col <3 (col+2 <5)
-            if (board[row] && board[row][col] === player && board[row+1] && board[row+1][col+1] === player && !board[row+2][col+2]) threats += 2;
-            if (board[row] && !board[row][col] && board[row+1] && board[row+1][col+1] === player && board[row+2] && board[row+2][col+2] === player) threats += 2;
+            if (board[row] && board[row][col] === player && board[row+1] && board[row+1][col+1] === player && !board[row+2][col+2]) threats += 2 * multiplier;
+            if (board[row] && !board[row][col] && board[row+1] && board[row+1][col+1] === player && board[row+2] && board[row+2][col+2] === player) threats += 2 * multiplier;
         }
     }
     // 斜め右上
     for (let row = 0; row < 2; row++) {
         for (let col = 2; col < 5; col++) {  // col <5 (col-2 >=0)
-            if (board[row] && board[row][col] === player && board[row+1] && board[row+1][col-1] === player && !board[row+2][col-2]) threats += 2;
-            if (board[row] && !board[row][col] && board[row+1] && board[row+1][col-1] === player && board[row+2] && board[row+2][col-2] === player) threats += 2;
+            if (board[row] && board[row][col] === player && board[row+1] && board[row+1][col-1] === player && !board[row+2][col-2]) threats += 2 * multiplier;
+            if (board[row] && !board[row][col] && board[row+1] && board[row+1][col-1] === player && board[row+2] && board[row+2][col-2] === player) threats += 2 * multiplier;
         }
     }
     return threats;
@@ -99,7 +100,7 @@ function canBlockImmediately(board, opponent) {
     return canWinImmediately(board, opponent);
 }
 
-// 2手先ブロック: 強化 - 複数脅威をすべてリスト、優先度付け
+// 2手先ブロック: 強化 - 複数脅威をすべてリスト、優先度付け (player脅威優先)
 function getCriticalBlocks(board, aiPlayer) {
     const nextOpponent = getNextPlayer(aiPlayer);
     const opponentWins = [];
@@ -112,7 +113,7 @@ function getCriticalBlocks(board, aiPlayer) {
         board[r][c] = null;
     }
     if (opponentWins.length === 0) return null;
-    // 複数なら、1手で最多カバー位置を探す
+    // 複数なら、1手で最多カバー位置を探す (playerなら重く)
     let bestCover = null;
     let maxCovers = 0;
     for (let [r, c] of empties) {
@@ -120,15 +121,16 @@ function getCriticalBlocks(board, aiPlayer) {
         for (let threat of opponentWins) {
             if (threat[0] === r && threat[1] === c) covers++;
         }
-        if (covers > maxCovers) {
-            maxCovers = covers;
+        const threatWeight = nextOpponent === 'player' ? covers * 2 : covers; // player脅威2倍
+        if (threatWeight > maxCovers) {
+            maxCovers = threatWeight;
             bestCover = [r, c];
         }
     }
     return bestCover || opponentWins[Math.floor(Math.random() * opponentWins.length)];
 }
 
-// 3手先脅威チェック (妨害強化)
+// 3手先脅威チェック (妨害強化、player優先)
 function getThreeStepThreats(board, aiPlayer) {
     const nextOpp = getNextPlayer(aiPlayer);
     const nextNext = getNextPlayer(nextOpp);
@@ -140,35 +142,36 @@ function getThreeStepThreats(board, aiPlayer) {
         board[r][c] = null;
         if (afterOpp) threats.push(afterOpp);
     }
-    return threats.length > 0 ? threats[0] : null;
+    // player脅威なら最優先
+    const playerThreats = threats.filter(t => getNextPlayer(nextOpp) === 'player');
+    return playerThreats.length > 0 ? playerThreats[0] : (threats.length > 0 ? threats[0] : null);
 }
 
 // 3人用Minimax: AI視点で自分のターンmax、他ターンmin - 妨害特化
 function minimax(board, depth, alpha, beta, currentTurn, aiPlayer) {
     if (depth === 0) {
-        // ヒューリスティック強化: 妨害重視 - 相手脅威超ペナルティ、自分の脅威大ボーナス
+        // ヒューリスティック強化: player脅威超ペナルティ
         const myThreats = evaluateThreats(board, aiPlayer);
         const opp1Threats = evaluateThreats(board, getNextPlayer(aiPlayer));
         const opp2Threats = evaluateThreats(board, getNextPlayer(getNextPlayer(aiPlayer)));
-        const mobility = getEmptyCells(board).length; // 移動性ボーナス
-        return myThreats * 200 + mobility * 5 - opp1Threats * 300 - opp2Threats * 300;
+        const mobility = getEmptyCells(board).length;
+        return myThreats * 200 + mobility * 5 - opp1Threats * 400 - opp2Threats * 300; // player (opp1?) を400に重く
     }
 
     const winner = getWinner(board);
     if (winner) {
-        // 妨害特化: 相手勝ちを極大ペナルティ、自分の勝ち超ボーナス
         const baseScore = winner === aiPlayer ? 5000 : -5000;
-        return baseScore + (winner === aiPlayer ? -depth * 50 : depth * 50); // 早い妨害/勝ちを優先
+        return baseScore + (winner === aiPlayer ? -depth * 50 : depth * 50);
     }
-    if (isFull(board)) return -10; // 引き分け軽ペナルティ (勝ち妨害より)
+    if (isFull(board)) return -10;
 
     const isMax = (currentTurn === aiPlayer);
     let best = isMax ? -Infinity : Infinity;
 
     const emptyCells = getEmptyCells(board);
-    // 手をソート: 簡略 - 中心優先のみ (evaluateThreats呼び出し削除で負荷減)
+    // 手をソート: 簡略 - 中心優先のみ
     emptyCells.sort((a, b) => {
-        const centerDistA = Math.abs(a[0] - 1.5) + Math.abs(a[1] - 2.5);  // 中心調整 (5列)
+        const centerDistA = Math.abs(a[0] - 1.5) + Math.abs(a[1] - 2.5);
         const centerDistB = Math.abs(b[0] - 1.5) + Math.abs(b[1] - 2.5);
         return centerDistA - centerDistB;
     });
@@ -234,8 +237,8 @@ function getBestMove(board, aiPlayer) {
     let bestMoves = [];
 
     const sortedCells = [...emptyCells].sort((a, b) => {
-        // 簡略ソート: 中心優先のみ (負荷減)
-        const centerDistA = Math.abs(a[0] - 1.5) + Math.abs(a[1] - 2.5);  // 中心調整 (5列)
+        // 簡略ソート: 中心優先のみ
+        const centerDistA = Math.abs(a[0] - 1.5) + Math.abs(a[1] - 2.5);
         const centerDistB = Math.abs(b[0] - 1.5) + Math.abs(b[1] - 2.5);
         return centerDistA - centerDistB;
     });
@@ -284,8 +287,8 @@ function renderBoard() {
         }
     }
     status.textContent = currentPlayer === 'player' ? 'あなたのターン (○)！' :
-                         currentPlayer === 'ai1' ? '✕のターン...（考え中）' :
-                         '神のターン...（考え中）';
+                         currentPlayer === 'ai1' ? 'AI✕のターン...（考え中）' :
+                         'AI神のターン...（考え中）';
 }
 
 function handleClick(e) {
