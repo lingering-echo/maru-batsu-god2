@@ -47,10 +47,10 @@ function getWinner(b) {
     return null;
 }
 
-// 脅威評価: 簡略版 - playerの脅威を重く (必勝法対策)
+// 脅威評価: 簡略版 - playerの脅威を重く (必勝法対策強化)
 function evaluateThreats(board, player) {
     let threats = 0;
-    const multiplier = player === 'player' ? 2 : 1; // player脅威を2倍重く
+    const multiplier = player === 'player' ? 3 : 1; // player脅威3倍重く (フォーク検知↑)
     // 横の2連続 (簡略: 境界安全)
     for (let row = 0; row < 4; row++) {
         for (let col = 0; col < 3; col++) {  // col <3 (col+2 <5)
@@ -100,7 +100,7 @@ function canBlockImmediately(board, opponent) {
     return canWinImmediately(board, opponent);
 }
 
-// 2手先ブロック: 強化 - 複数脅威をすべてリスト、優先度付け (player脅威優先)
+// 2手先ブロック: 強化 - 複数脅威をすべてリスト、優先度付け (player脅威優先強化)
 function getCriticalBlocks(board, aiPlayer) {
     const nextOpponent = getNextPlayer(aiPlayer);
     const opponentWins = [];
@@ -113,7 +113,7 @@ function getCriticalBlocks(board, aiPlayer) {
         board[r][c] = null;
     }
     if (opponentWins.length === 0) return null;
-    // 複数なら、1手で最多カバー位置を探す (playerなら重く)
+    // 複数なら、1手で最多カバー位置を探す (playerなら3倍重く)
     let bestCover = null;
     let maxCovers = 0;
     for (let [r, c] of empties) {
@@ -121,7 +121,7 @@ function getCriticalBlocks(board, aiPlayer) {
         for (let threat of opponentWins) {
             if (threat[0] === r && threat[1] === c) covers++;
         }
-        const threatWeight = nextOpponent === 'player' ? covers * 2 : covers; // player脅威2倍
+        const threatWeight = nextOpponent === 'player' ? covers * 3 : covers; // player脅威3倍
         if (threatWeight > maxCovers) {
             maxCovers = threatWeight;
             bestCover = [r, c];
@@ -142,9 +142,20 @@ function getThreeStepThreats(board, aiPlayer) {
         board[r][c] = null;
         if (afterOpp) threats.push(afterOpp);
     }
-    // player脅威なら最優先
-    const playerThreats = threats.filter(t => getNextPlayer(nextOpp) === 'player');
-    return playerThreats.length > 0 ? playerThreats[0] : (threats.length > 0 ? threats[0] : null);
+    // player脅威なら最優先 (複数ならランダム)
+    const playerThreats = threats.filter(t => nextNext === 'player');
+    return playerThreats.length > 0 ? playerThreats[Math.floor(Math.random() * playerThreats.length)] : (threats.length > 0 ? threats[0] : null);
+}
+
+// 必勝法特定パターン検知 (この配置似のフォークをブロック優先)
+function detectForkPattern(board, aiPlayer) {
+    // 例: row0 col1=○, row1 col2=○, row2 col1=○, row3 col0=神 などのキー配置チェック
+    if (board[0][1] === '○' && board[1][2] === '○' && board[2][1] === '○' && board[3][0] === 'ai2' && board[0][3] === 'ai1') {
+        // フォーク脅威位置 (2,3) などブロック
+        const forkBlock = [2, 3]; // この一手ブロック
+        if (!board[2][3]) return forkBlock;
+    }
+    return null;
 }
 
 // 3人用Minimax: AI視点で自分のターンmax、他ターンmin - 妨害特化
@@ -155,7 +166,9 @@ function minimax(board, depth, alpha, beta, currentTurn, aiPlayer) {
         const opp1Threats = evaluateThreats(board, getNextPlayer(aiPlayer));
         const opp2Threats = evaluateThreats(board, getNextPlayer(getNextPlayer(aiPlayer)));
         const mobility = getEmptyCells(board).length;
-        return myThreats * 200 + mobility * 5 - opp1Threats * 400 - opp2Threats * 300; // player (opp1?) を400に重く
+        // player (opp1 if ai1/ai2ターン) を-500に超重く
+        const playerPenalty = getNextPlayer(aiPlayer) === 'player' ? opp1Threats * 500 : (getNextPlayer(getNextPlayer(aiPlayer)) === 'player' ? opp2Threats * 500 : 0);
+        return myThreats * 200 + mobility * 5 - playerPenalty - (opp1Threats + opp2Threats) * 300;
     }
 
     const winner = getWinner(board);
@@ -205,6 +218,13 @@ function getBestMove(board, aiPlayer) {
         return immediateWin;
     }
 
+    // 必勝法特定パターン検知 (即ブロック)
+    let forkBlock = detectForkPattern(board, aiPlayer);
+    if (forkBlock) {
+        console.log(`Fork pattern block for ${aiPlayer} at`, forkBlock);
+        return forkBlock;
+    }
+
     // 2手先ブロックチェック (複数脅威対応強化)
     let criticalBlock = getCriticalBlocks(board, aiPlayer);
     if (criticalBlock) {
@@ -227,9 +247,9 @@ function getBestMove(board, aiPlayer) {
         return immediateBlock;
     }
 
-    // 固定depth: フリーズなし賢さ (5固定で速く、数手先読み)
-    let depth = 5; // 安全ライン: 0.1-0.3秒、2-3手先読み
-    if (aiPlayer === 'ai2') depth = 6; // 神少し深く
+    // 固定depth: 微増でフォーク予測 (重さギリOK)
+    let depth = 6; // ×=6、神=7
+    if (aiPlayer === 'ai2') depth = 7;
 
     console.log(`Computing best move for ${aiPlayer}, depth=${depth}, empty=${emptyCells.length}`);
 
@@ -287,8 +307,8 @@ function renderBoard() {
         }
     }
     status.textContent = currentPlayer === 'player' ? 'あなたのターン (○)！' :
-                         currentPlayer === 'ai1' ? 'AI✕のターン...（考え中）' :
-                         'AI神のターン...（考え中）';
+                         currentPlayer === 'ai1' ? '✕のターン...（考え中）' :
+                         '神のターン...（考え中）';
 }
 
 function handleClick(e) {
@@ -412,7 +432,7 @@ function announceWin(player) {
 }
 
 function announceDraw() {
-    status.textContent = '引き分けだね！';
+    status.textContent = '引き分け！';
     boardEl.querySelectorAll('.cell').forEach(cell => {
         cell.style.pointerEvents = 'none';
         cell.disabled = true;
